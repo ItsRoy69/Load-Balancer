@@ -1,0 +1,10 @@
+.discord_button {
+  position: fixed;
+  left: 5vh;
+  bottom: 5vh;
+  transition: all 0.2s ease-in 0s;
+  z-index: 9999;
+  cursor: pointer;
+  /* background: black;
+  border-radius: 100px; */
+}
