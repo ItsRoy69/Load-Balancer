@@ -15,6 +15,7 @@ This project implements a dynamic load balancer using Node.js and Express. It di
 - Rate Limiter
 - Sticky sessions
 - Caching
+- Content-based routing
 
 ## Prerequisites
 
