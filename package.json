@@ -1,0 +1,18 @@
+{
+  "name": "profile",
+  "version": "1.0.0",
+  "main": "load-balancer.js",
+  "type": "module",
+  "scripts": {
+    "start": "node load-balancer.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "express": "^4.19.2",
+    "http-proxy": "^1.18.1",
+    "node-fetch": "^3.3.2"
+  }
+}
