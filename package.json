@@ -14,7 +14,10 @@
     "cookie-parser": "^1.4.6",
     "express": "^4.19.2",
     "express-rate-limit": "^7.3.1",
+    "fs": "^0.0.1-security",
     "http-proxy": "^1.18.1",
+    "https": "^1.0.0",
+    "node-cache": "^5.1.2",
     "node-fetch": "^3.3.2"
   }
 }

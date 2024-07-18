@@ -28,5 +28,7 @@
     "_test_only_chances_of_healing_server": 0.5,
     "enableStickySession": true,
     "stickySessionCookieName": "SERVERID",
-    "stickySessionCookieMaxAge": 3600000
+    "stickySessionCookieMaxAge": 3600000,
+    "enableCache": true,
+    "cacheTTL": 300
 }

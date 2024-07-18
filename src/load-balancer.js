@@ -5,6 +5,7 @@ import fs from 'fs';
 import fetch from 'node-fetch';
 import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
+import NodeCache from 'node-cache';
 
 const config = JSON.parse(fs.readFileSync('config/config.json', 'utf8'));
 
@@ -18,6 +19,8 @@ let currentIndex = 0;
 
 let beFailureStreak = 0;
 let allBeFailureStreak = 0;
+
+const cache = new NodeCache({ stdTTL: config.cacheTTL, checkperiod: config.cacheTTL * 2 });
 
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, 
@@ -174,6 +177,21 @@ function addServer(server) {
 }
 
 async function retryRequest(req, res) {
+    const cacheKey = req.method + req.url;
+    
+    if (config.enableCache && req.method === 'GET') {
+        const cachedResponse = cache.get(cacheKey);
+        if (cachedResponse) {
+            console.log(`Cache hit for ${cacheKey}`);
+            res.status(cachedResponse.status);
+            for (const [key, value] of Object.entries(cachedResponse.headers)) {
+                res.setHeader(key, value);
+            }
+            res.send(cachedResponse.body);
+            return;
+        }
+    }
+
     for (let i = 0; i < config.be_retries; i++) {
         const server = selectServer(req);
         if (!server) {
@@ -203,11 +221,21 @@ async function retryRequest(req, res) {
                 res.cookie(config.stickySessionCookieName, server.domain, {
                     maxAge: config.stickySessionCookieMaxAge,
                     httpOnly: true,
-                    secure: process.env.NODE_ENV === 'production'
+                    secure: false 
                 });
             }
 
-            res.send(await proxyRes.buffer());
+            const responseBody = await proxyRes.buffer();
+            
+            if (config.enableCache && req.method === 'GET' && proxyRes.status === 200) {
+                cache.set(cacheKey, {
+                    status: proxyRes.status,
+                    headers: Object.fromEntries(proxyRes.headers),
+                    body: responseBody
+                }, config.cacheTTL);
+            }
+
+            res.send(responseBody);
             return;
         } catch (error) {
             console.error(`Error proxying to ${server.domain}:`, error);
@@ -236,7 +264,6 @@ app.use((req, res) => {
     });
 });
 
-const server = http.createServer(app);
-server.listen(config.lbPORT, () => {
-    console.log(`Load balancer running on port ${config.lbPORT}`);
+http.createServer(app).listen(config.lbPORT, () => {
+    console.log(`Load balancer running on port ${config.lbPORT} (HTTP)`);
 });
