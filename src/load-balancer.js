@@ -4,7 +4,7 @@ import httpProxy from 'http-proxy';
 import fs from 'fs';
 import fetch from 'node-fetch';
 
-const config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
+const config = JSON.parse(fs.readFileSync('config/config.json', 'utf8'));
 
 const app = express();
 

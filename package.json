@@ -1,10 +1,10 @@
 {
   "name": "profile",
   "version": "1.0.0",
-  "main": "load-balancer.js",
+  "main": "src/load-balancer.js",
   "type": "module",
   "scripts": {
-    "start": "node load-balancer.js"
+    "start": "node src/load-balancer.js"
   },
   "keywords": [],
   "author": "",
