@@ -3,6 +3,8 @@ import http from 'http';
 import httpProxy from 'http-proxy';
 import fs from 'fs';
 import fetch from 'node-fetch';
+import rateLimit from 'express-rate-limit';
+import cookieParser from 'cookie-parser';
 
 const config = JSON.parse(fs.readFileSync('config/config.json', 'utf8'));
 
@@ -16,6 +18,17 @@ let currentIndex = 0;
 
 let beFailureStreak = 0;
 let allBeFailureStreak = 0;
+
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, 
+    max: 100,
+    standardHeaders: true,
+    legacyHeaders: false, 
+    message: 'Too many requests from this IP, please try again later.',
+});
+
+app.use(limiter);
+app.use(cookieParser());
 
 async function performHealthCheck(server) {
     for (let i = 0; i < config.be_ping_retries; i++) {
@@ -95,7 +108,18 @@ async function attemptServerHeal(server) {
     }
 }
 
-function selectServer() {
+function selectServer(req) {
+    if (config.enableStickySession) {
+        const serverId = req.cookies[config.stickySessionCookieName];
+        if (serverId) {
+            const server = serverPool.find(s => s.domain === serverId);
+            if (server && !server.isDown) {
+                console.log(`Sticky session - Using server: ${server.domain}`);
+                return server;
+            }
+        }
+    }
+
     console.log(`Current server pool:`, serverPool.map(s => s.domain));
     console.log(`Current load balancing algorithm: ${config._lbAlgo}`);
     let selectedServer;
@@ -151,7 +175,7 @@ function addServer(server) {
 
 async function retryRequest(req, res) {
     for (let i = 0; i < config.be_retries; i++) {
-        const server = selectServer();
+        const server = selectServer(req);
         if (!server) {
             return res.status(503).send('No available servers');
         }
@@ -165,16 +189,33 @@ async function retryRequest(req, res) {
                 redirect: 'manual'
             });
 
+            if (proxyRes.status === 429) {
+                res.status(429).send('Rate limit exceeded. Please try again later.');
+                return;
+            }
+
             res.status(proxyRes.status);
             for (const [key, value] of proxyRes.headers) {
                 res.setHeader(key, value);
             }
+
+            if (config.enableStickySession && !req.cookies[config.stickySessionCookieName]) {
+                res.cookie(config.stickySessionCookieName, server.domain, {
+                    maxAge: config.stickySessionCookieMaxAge,
+                    httpOnly: true,
+                    secure: process.env.NODE_ENV === 'production'
+                });
+            }
+
             res.send(await proxyRes.buffer());
             return;
         } catch (error) {
             console.error(`Error proxying to ${server.domain}:`, error);
             server.isDown = true;
             removeServer(server);
+            if (config.enableStickySession) {
+                res.clearCookie(config.stickySessionCookieName);
+            }
             if (config.enableSelfHealing) {
                 attemptServerHeal(server);
             }

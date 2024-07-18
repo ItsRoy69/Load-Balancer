@@ -12,6 +12,8 @@ This project implements a dynamic load balancer using Node.js and Express. It di
 - Self-healing attempts for failed servers
 - Configurable retry logic
 - Alert system for server failures
+- Rate Limiter
+- Sticky sessions
 
 ## Prerequisites
 
