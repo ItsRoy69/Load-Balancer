@@ -6,6 +6,7 @@ import fetch from 'node-fetch';
 import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import NodeCache from 'node-cache';
+import bodyParser from 'body-parser';
 
 const config = JSON.parse(fs.readFileSync('config/config.json', 'utf8'));
 
@@ -32,6 +33,7 @@ const limiter = rateLimit({
 
 app.use(limiter);
 app.use(cookieParser());
+app.use(bodyParser.json());
 
 async function performHealthCheck(server) {
     for (let i = 0; i < config.be_ping_retries; i++) {
@@ -112,6 +114,15 @@ async function attemptServerHeal(server) {
 }
 
 function selectServer(req) {
+    const contentBasedRoute = findContentBasedRoute(req);
+    if (contentBasedRoute) {
+        const server = serverPool.find(s => s.domain === contentBasedRoute.server);
+        if (server && !server.isDown) {
+            console.log(`Content-based routing - Using server: ${server.domain}`);
+            return server;
+        }
+    }
+
     if (config.enableStickySession) {
         const serverId = req.cookies[config.stickySessionCookieName];
         if (serverId) {
@@ -139,6 +150,30 @@ function selectServer(req) {
     }
     console.log(`Selected server: ${selectedServer.domain}`);
     return selectedServer;
+}
+
+function findContentBasedRoute(req) {
+    if (!config.contentBasedRouting) return null;
+
+    for (const rule of config.contentBasedRouting) {
+        if (rule.path && req.url.startsWith(rule.path)) {
+            return rule;
+        }
+        if (rule.header) {
+            const headerName = Object.keys(rule.header)[0];
+            if (req.headers[headerName.toLowerCase()] === rule.header[headerName]) {
+                return rule;
+            }
+        }
+        if (rule.payload && req.body) {
+            const payloadKey = Object.keys(rule.payload)[0];
+            if (req.body[payloadKey] === rule.payload[payloadKey]) {
+                return rule;
+            }
+        }
+    }
+
+    return null;
 }
 
 function selectRoundRobinServer() {

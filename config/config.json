@@ -30,5 +30,23 @@
     "stickySessionCookieName": "SERVERID",
     "stickySessionCookieMaxAge": 3600000,
     "enableCache": true,
-    "cacheTTL": 300
+    "cacheTTL": 300,
+    "contentBasedRouting": [
+        {
+            "path": "/api/users",
+            "server": "http://localhost:8081"
+        },
+        {
+            "header": {
+                "X-Service": "orders"
+            },
+            "server": "http://localhost:8082"
+        },
+        {
+            "payload": {
+                "type": "premium"
+            },
+            "server": "http://localhost:8083"
+        }
+    ]
 }
