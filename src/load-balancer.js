@@ -1,14 +1,12 @@
 import express from 'express';
 import http from 'http';
 import httpProxy from 'http-proxy';
-import fs from 'fs';
 import fetch from 'node-fetch';
 import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import NodeCache from 'node-cache';
 import bodyParser from 'body-parser';
-
-const config = JSON.parse(fs.readFileSync('config/config.json', 'utf8'));
+import config from '../config/config.js';
 
 const app = express();
 
