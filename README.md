@@ -41,7 +41,7 @@ npm install
 
 ## Configuration
 
-Edit `config/config.json` to set up your environment:
+Edit `config/config.js` to set up your environment:
 
 - `lbPORT`: Port for the load balancer
 - `_lbAlgo`: Load balancing algorithm ('rr' for Round Robin, 'wrr' for Weighted Round Robin)
