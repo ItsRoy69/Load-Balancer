@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import NodeCache from 'node-cache';
 import bodyParser from 'body-parser';
+import crypto from 'crypto';
 import config from '../config/config.js';
 
 const app = express();
@@ -32,6 +33,19 @@ const limiter = rateLimit({
 app.use(limiter);
 app.use(cookieParser());
 app.use(bodyParser.json());
+
+function generateRequestId() {
+    return crypto.randomBytes(16).toString('hex');
+}
+
+function logRequest(requestId, message, details = {}) {
+    console.log(JSON.stringify({
+        timestamp: new Date().toISOString(),
+        requestId,
+        message,
+        ...details
+    }));
+}
 
 async function performHealthCheck(server) {
     for (let i = 0; i < config.be_ping_retries; i++) {
@@ -210,17 +224,30 @@ function addServer(server) {
 }
 
 async function retryRequest(req, res) {
+    const requestId = generateRequestId();
+    const startTime = Date.now();
     const cacheKey = req.method + req.url;
     
+    logRequest(requestId, 'Incoming request', {
+        method: req.method,
+        url: req.url,
+        headers: req.headers
+    });
+
     if (config.enableCache && req.method === 'GET') {
         const cachedResponse = cache.get(cacheKey);
         if (cachedResponse) {
-            console.log(`Cache hit for ${cacheKey}`);
+            logRequest(requestId, 'Cache hit', { cacheKey });
             res.status(cachedResponse.status);
             for (const [key, value] of Object.entries(cachedResponse.headers)) {
                 res.setHeader(key, value);
             }
             res.send(cachedResponse.body);
+            logRequest(requestId, 'Request completed', {
+                duration: Date.now() - startTime,
+                status: cachedResponse.status,
+                source: 'cache'
+            });
             return;
         }
     }
@@ -228,8 +255,12 @@ async function retryRequest(req, res) {
     for (let i = 0; i < config.be_retries; i++) {
         const server = selectServer(req);
         if (!server) {
-            return res.status(503).send('No available servers');
+            logRequest(requestId, 'No available servers');
+            res.status(503).send('No available servers');
+            return;
         }
+
+        logRequest(requestId, 'Selected server', { server: server.domain, attempt: i + 1 });
 
         try {
             const targetUrl = new URL(req.url, server.domain);
@@ -240,8 +271,14 @@ async function retryRequest(req, res) {
                 redirect: 'manual'
             });
 
+            logRequest(requestId, 'Received response from backend', {
+                status: proxyRes.status,
+                headers: Object.fromEntries(proxyRes.headers)
+            });
+
             if (proxyRes.status === 429) {
                 res.status(429).send('Rate limit exceeded. Please try again later.');
+                logRequest(requestId, 'Rate limit exceeded');
                 return;
             }
 
@@ -256,6 +293,7 @@ async function retryRequest(req, res) {
                     httpOnly: true,
                     secure: false 
                 });
+                logRequest(requestId, 'Set sticky session cookie', { server: server.domain });
             }
 
             const responseBody = await proxyRes.buffer();
@@ -266,16 +304,26 @@ async function retryRequest(req, res) {
                     headers: Object.fromEntries(proxyRes.headers),
                     body: responseBody
                 }, config.cacheTTL);
+                logRequest(requestId, 'Cached response', { cacheKey });
             }
 
             res.send(responseBody);
+            logRequest(requestId, 'Request completed', {
+                duration: Date.now() - startTime,
+                status: proxyRes.status,
+                source: 'backend'
+            });
             return;
         } catch (error) {
-            console.error(`Error proxying to ${server.domain}:`, error);
+            logRequest(requestId, 'Error proxying to backend', {
+                server: server.domain,
+                error: error.message
+            });
             server.isDown = true;
             removeServer(server);
             if (config.enableStickySession) {
                 res.clearCookie(config.stickySessionCookieName);
+                logRequest(requestId, 'Cleared sticky session cookie');
             }
             if (config.enableSelfHealing) {
                 attemptServerHeal(server);
@@ -284,15 +332,29 @@ async function retryRequest(req, res) {
         await new Promise(resolve => setTimeout(resolve, config.be_retry_delay));
     }
     res.status(502).send('Bad Gateway');
+    logRequest(requestId, 'Request failed after all retries', {
+        duration: Date.now() - startTime,
+        status: 502
+    });
 }
 
 app.get('/health', (req, res) => {
+    const requestId = generateRequestId();
+    logRequest(requestId, 'Health check request');
     res.status(200).send('OK');
+    logRequest(requestId, 'Health check response sent');
 });
 
 app.use((req, res) => {
+    const requestId = generateRequestId();
+    logRequest(requestId, 'Received request', {
+        method: req.method,
+        url: req.url,
+        headers: req.headers
+    });
     retryRequest(req, res).catch(error => {
         console.error('Unhandled error in retryRequest:', error);
+        logRequest(requestId, 'Unhandled error', { error: error.message });
         res.status(500).send('Internal Server Error');
     });
 });
