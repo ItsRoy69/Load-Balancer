@@ -11,6 +11,7 @@
   "license": "ISC",
   "description": "Global load balancer with multi-region support",
   "dependencies": {
+    "better-queue": "^3.8.12",
     "body-parser": "^1.19.0",
     "cookie-parser": "^1.4.6",
     "dotenv": "^16.4.5",
@@ -20,6 +21,7 @@
     "http-proxy": "^1.18.1",
     "https": "^1.0.0",
     "node-cache": "^5.1.2",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "opossum": "^8.1.4"
   }
 }

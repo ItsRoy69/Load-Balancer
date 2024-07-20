@@ -8,6 +8,9 @@ import NodeCache from "node-cache";
 import bodyParser from "body-parser";
 import crypto from "crypto";
 import config from "../config/config.js";
+import pkg from 'opossum';
+const { CircuitBreaker } = pkg;
+import { cpus } from 'os';
 
 const app = express();
 
@@ -23,15 +26,34 @@ const cache = new NodeCache({
   checkperiod: config.cacheTTL * 2,
 });
 
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: "Too many requests from this IP, please try again later.",
+let serverHealthScores = {};
+const circuitBreakers = {};
+const requestPriorities = {
+  HIGH: 3,
+  MEDIUM: 2,
+  LOW: 1
+};
+
+const rateLimiter = rateLimit({
+  windowMs: config.rateLimitWindow,
+  max: (req) => {
+    const currentLoad = getSystemLoad();
+    if (currentLoad > 80) {
+      return Math.floor(config.rateLimitMax * 0.5);
+    } else if (currentLoad > 60) {
+      return Math.floor(config.rateLimitMax * 0.75);
+    }
+    return config.rateLimitMax;
+  },
+  keyGenerator: (req) => {
+    return req.ip + '-' + req.headers['user-agent'];
+  },
+  handler: (req, res) => {
+    res.status(429).send('Too many requests, please try again later.');
+  }
 });
 
-app.use(limiter);
+app.use(rateLimiter);
 app.use(cookieParser());
 app.use(bodyParser.json());
 
@@ -50,10 +72,28 @@ function logRequest(requestId, message, details = {}) {
   );
 }
 
+function updateServerHealthScore(server) {
+  if (!serverHealthScores[server.domain]) {
+    serverHealthScores[server.domain] = 100;
+  }
+
+  if (server.isDown) {
+    serverHealthScores[server.domain] = Math.max(0, serverHealthScores[server.domain] - 20);
+  } else {
+    serverHealthScores[server.domain] = Math.min(100, serverHealthScores[server.domain] + 5);
+  }
+}
+
 async function performHealthCheck(server) {
+  if (!server || !server.domain) {
+    console.error('Invalid server object:', server);
+    return false;
+  }
+
   for (let i = 0; i < config.be_ping_retries; i++) {
     try {
-      const response = await fetch(`${server.domain}${config.be_ping_path}`, {
+      const url = new URL(config.be_ping_path, server.domain);
+      const response = await fetch(url, {
         timeout: 5000,
       });
       if (response.ok) {
@@ -99,6 +139,7 @@ async function periodicHealthChecks() {
         );
         beFailureStreak = 0;
       }
+      updateServerHealthScore(server);
       if (isHealthy) {
         allRegionServersDown = false;
       }
@@ -168,16 +209,16 @@ async function selectServer(req, forceRegion = null) {
     return null;
   }
 
-  const regionServers = regionConfig.servers.filter((s) => !s.isDown);
+  const healthyServers = regionConfig.servers.filter(s => !s.isDown && serverHealthScores[s.domain] > 30);
 
-  if (regionServers.length === 0) {
-    console.error(`No available servers in region ${region}`);
+  if (healthyServers.length === 0) {
+    console.error(`No healthy servers available in region ${region}`);
     return null;
   }
 
   const contentBasedRoute = findContentBasedRoute(req);
   if (contentBasedRoute) {
-    const server = regionServers.find(
+    const server = healthyServers.find(
       (s) => s.domain === contentBasedRoute.server
     );
     if (server) {
@@ -189,7 +230,7 @@ async function selectServer(req, forceRegion = null) {
   if (config.enableStickySession) {
     const serverId = req.cookies[config.stickySessionCookieName];
     if (serverId) {
-      const server = regionServers.find((s) => s.domain === serverId);
+      const server = healthyServers.find((s) => s.domain === serverId);
       if (server) {
         console.log(`Sticky session - Using server: ${server.domain}`);
         return server;
@@ -198,27 +239,27 @@ async function selectServer(req, forceRegion = null) {
   }
 
   console.log(
-    `Current server pool in region ${region}:`,
-    regionServers.map((s) => s.domain)
+    `Current healthy server pool in region ${region}:`,
+    healthyServers.map((s) => s.domain)
   );
   console.log(`Current load balancing algorithm: ${config._lbAlgo}`);
 
   let selectedServer;
   if (config.enableLatencyBasedRouting) {
-    selectedServer = selectLatencyBasedServer(regionServers);
+    selectedServer = selectLatencyBasedServer(healthyServers);
   } else {
     switch (config._lbAlgo) {
       case "rr":
-        selectedServer = selectRoundRobinServer(regionServers);
+        selectedServer = selectRoundRobinServer(healthyServers);
         break;
       case "wrr":
-        selectedServer = selectWeightedRoundRobinServer(regionServers);
+        selectedServer = selectWeightedRoundRobinServer(healthyServers);
         break;
       default:
         console.warn(
           `Unknown algorithm: ${config._lbAlgo}. Falling back to round robin.`
         );
-        selectedServer = selectRoundRobinServer(regionServers);
+        selectedServer = selectRoundRobinServer(healthyServers);
     }
   }
 
@@ -299,10 +340,40 @@ if (config.enableLatencyBasedRouting) {
   setInterval(updateServerLatencies, config.latencyCheckInterval);
 }
 
+function getCircuitBreaker(server) {
+  if (!circuitBreakers[server.domain]) {
+    circuitBreakers[server.domain] = new CircuitBreaker(async () => {
+      const response = await fetch(`${server.domain}${config.be_ping_path}`);
+      if (!response.ok) throw new Error('Server unhealthy');
+    }, {
+      timeout: 3000,
+      errorThresholdPercentage: 50,
+      resetTimeout: 30000
+    });
+
+    circuitBreakers[server.domain].on('open', () => {
+      console.log(`Circuit breaker opened for ${server.domain}`);
+      server.isDown = true;
+    });
+
+    circuitBreakers[server.domain].on('halfOpen', () => {
+      console.log(`Circuit breaker half-opened for ${server.domain}`);
+    });
+
+    circuitBreakers[server.domain].on('close', () => {
+      console.log(`Circuit breaker closed for ${server.domain}`);
+      server.isDown = false;
+    });
+  }
+
+  return circuitBreakers[server.domain];
+}
+
 async function retryRequest(req, res) {
   const requestId = generateRequestId();
   const startTime = Date.now();
   const cacheKey = req.method + req.url;
+  const priority = getPriority(req);
 
   logRequest(requestId, "Incoming request", {
     method: req.method,
@@ -333,6 +404,13 @@ async function retryRequest(req, res) {
       const server = await selectServer(req, region.name);
       if (!server) continue;
 
+      const circuitBreaker = getCircuitBreaker(server);
+
+      if (circuitBreaker.opened) {
+        logRequest(requestId, "Circuit breaker open, skipping server", { server: server.domain });
+        continue;
+      }
+
       logRequest(requestId, "Selected server", {
         server: server.domain,
         region: region.name,
@@ -340,6 +418,8 @@ async function retryRequest(req, res) {
       });
 
       try {
+        await circuitBreaker.fire();
+
         const targetUrl = new URL(req.url, server.domain);
         const proxyRes = await fetch(targetUrl, {
           method: req.method,
@@ -407,6 +487,10 @@ async function retryRequest(req, res) {
           status: proxyRes.status,
           source: "backend",
         });
+
+        // Update health score after successful request
+        updateServerHealthScore(server);
+
         return;
       } catch (error) {
         logRequest(requestId, "Error proxying to backend", {
@@ -414,6 +498,7 @@ async function retryRequest(req, res) {
           region: region.name,
           error: error.message,
         });
+        updateServerHealthScore(server);
         server.isDown = true;
         if (config.enableStickySession) {
           res.clearCookie(config.stickySessionCookieName);
@@ -428,10 +513,15 @@ async function retryRequest(req, res) {
       );
     }
   }
-  res.status(502).send("Bad Gateway");
+
+  if (priority === requestPriorities.HIGH) {
+    res.status(503).send("Service Unavailable. Please try again later.");
+  } else {
+    res.status(429).send("Server is experiencing high load. Please try again later.");
+  }
   logRequest(requestId, "Request failed after all retries", {
     duration: Date.now() - startTime,
-    status: 502,
+    status: priority === requestPriorities.HIGH ? 503 : 429,
   });
 }
 
@@ -440,6 +530,15 @@ app.get("/health", (req, res) => {
   logRequest(requestId, "Health check request");
   res.status(200).send("OK");
   logRequest(requestId, "Health check response sent");
+});
+
+app.use((req, res, next) => {
+  const priority = getPriority(req);
+  if (priority === requestPriorities.LOW && getSystemLoad() > 80) {
+    res.status(503).send("Service temporarily unavailable due to high load. Please try again later.");
+  } else {
+    next();
+  }
 });
 
 app.use((req, res) => {
@@ -455,6 +554,32 @@ app.use((req, res) => {
     res.status(500).send("Internal Server Error");
   });
 });
+
+function getSystemLoad() {
+  const cpuInfo = cpus();
+  let totalIdle = 0;
+  let totalTick = 0;
+
+  for(let i = 0, len = cpuInfo.length; i < len; i++) {
+    const cpu = cpuInfo[i];
+    for(let type in cpu.times) {
+      totalTick += cpu.times[type];
+    }
+    totalIdle += cpu.times.idle;
+  }
+
+  return 100 - ~~(100 * totalIdle / totalTick);
+}
+
+function getPriority(req) {
+  if (req.headers['x-priority'] === 'high') {
+    return requestPriorities.HIGH;
+  } else if (req.headers['x-priority'] === 'medium') {
+    return requestPriorities.MEDIUM;
+  } else {
+    return requestPriorities.LOW;
+  }
+}
 
 http.createServer(app).listen(config.lbPORT, () => {
   console.log(`Load balancer running on port ${config.lbPORT} (HTTP)`);

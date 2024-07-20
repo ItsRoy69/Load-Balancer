@@ -24,58 +24,57 @@ const config = {
   cacheTTL: parseInt(process.env.CACHE_TTL, 10) || 300,
   contentBasedRouting: JSON.parse(process.env.CONTENT_BASED_ROUTING || '[]'),
 
-regions: [
-  {
-    name: 'us-east',
-    servers: [
-      { domain: process.env.US_EAST_SERVER_1, weight: 1 },
-      { domain: process.env.US_EAST_SERVER_2, weight: 1 },
-    ],
-  },
-  {
-    name: 'us-west',
-    servers: [
-      { domain: process.env.US_WEST_SERVER_1, weight: 1 },
-      { domain: process.env.US_WEST_SERVER_2, weight: 1 },
-    ],
-  },
-  {
-    name: 'eu-west',
-    servers: [
-      { domain: process.env.EU_WEST_SERVER_1, weight: 1 },
-      { domain: process.env.EU_WEST_SERVER_2, weight: 1 },
-    ],
-  },
-  {
-    name: 'eu-central',
-    servers: [
-      { domain: process.env.EU_CENTRAL_SERVER_1, weight: 1 },
-      { domain: process.env.EU_CENTRAL_SERVER_2, weight: 1 },
-    ],
-  },
-  {
-    name: 'ap-southeast',
-    servers: [
-      { domain: process.env.AP_SOUTHEAST_SERVER_1, weight: 1 },
-      { domain: process.env.AP_SOUTHEAST_SERVER_2, weight: 1 },
-    ],
-  },
-  {
-    name: 'ap-northeast',
-    servers: [
-      { domain: process.env.AP_NORTHEAST_SERVER_1, weight: 1 },
-      { domain: process.env.AP_NORTHEAST_SERVER_2, weight: 1 },
-    ],
-  },
-  {
-    name: 'sa-east',
-    servers: [
-      { domain: process.env.SA_EAST_SERVER_1, weight: 1 },
-      { domain: process.env.SA_EAST_SERVER_2, weight: 1 },
-    ],
-  },
-],
-defaultRegion: process.env.DEFAULT_REGION || 'us-east',
+  regions: [
+    {
+      name: 'us-east',
+      servers: [
+        { domain: process.env.US_EAST_SERVER_1, weight: 1 },
+        { domain: process.env.US_EAST_SERVER_2, weight: 1 },
+      ],
+    },
+    {
+      name: 'us-west',
+      servers: [
+        { domain: process.env.US_WEST_SERVER_1, weight: 1 },
+        { domain: process.env.US_WEST_SERVER_2, weight: 1 },
+      ],
+    },
+    {
+      name: 'eu-west',
+      servers: [
+        { domain: process.env.EU_WEST_SERVER_1, weight: 1 },
+        { domain: process.env.EU_WEST_SERVER_2, weight: 1 },
+      ],
+    },
+    {
+      name: 'eu-central',
+      servers: [
+        { domain: process.env.EU_CENTRAL_SERVER_1, weight: 1 },
+        { domain: process.env.EU_CENTRAL_SERVER_2, weight: 1 },
+      ],
+    },
+    {
+      name: 'ap-southeast',
+      servers: [
+        { domain: process.env.AP_SOUTHEAST_SERVER_1, weight: 1 },
+        { domain: process.env.AP_SOUTHEAST_SERVER_2, weight: 1 },
+      ],
+    },
+    {
+      name: 'ap-northeast',
+      servers: [
+        { domain: process.env.AP_NORTHEAST_SERVER_1, weight: 1 },
+        { domain: process.env.AP_NORTHEAST_SERVER_2, weight: 1 },
+      ],
+    },
+    {
+      name: 'sa-east',
+      servers: [
+        { domain: process.env.SA_EAST_SERVER_1, weight: 1 },
+        { domain: process.env.SA_EAST_SERVER_2, weight: 1 },
+      ],
+    },
+  ],
   defaultRegion: process.env.DEFAULT_REGION || 'us-east',
   enableGeoRouting: process.env.ENABLE_GEO_ROUTING === 'true',
   geoRoutingService: process.env.GEO_ROUTING_SERVICE,
@@ -127,6 +126,13 @@ defaultRegion: process.env.DEFAULT_REGION || 'us-east',
   dynamicConfigInterval: parseInt(process.env.DYNAMIC_CONFIG_INTERVAL, 10) || 60000,
 
   gracefulShutdownTimeout: parseInt(process.env.GRACEFUL_SHUTDOWN_TIMEOUT, 10) || 30000,
+
+  healthScoreThreshold: parseInt(process.env.HEALTH_SCORE_THRESHOLD, 10) || 30,
+  systemLoadThreshold: parseInt(process.env.SYSTEM_LOAD_THRESHOLD, 10) || 80,
+  circuitBreakerErrorThreshold: parseInt(process.env.CIRCUIT_BREAKER_ERROR_THRESHOLD, 10) || 50,
+  circuitBreakerResetTimeout: parseInt(process.env.CIRCUIT_BREAKER_RESET_TIMEOUT, 10) || 30000,
+  enablePrioritization: process.env.ENABLE_PRIORITIZATION === 'true',
+  lowPriorityMaxLoad: parseInt(process.env.LOW_PRIORITY_MAX_LOAD, 10) || 80,
 };
 
 export default config;
