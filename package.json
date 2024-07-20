@@ -22,6 +22,7 @@
     "https": "^1.0.0",
     "node-cache": "^5.1.2",
     "node-fetch": "^3.3.2",
-    "opossum": "^8.1.4"
+    "opossum": "^8.1.4",
+    "prom-client": "^15.1.3"
   }
 }

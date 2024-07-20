@@ -131,6 +131,10 @@ const config = {
   systemLoadThreshold: parseInt(process.env.SYSTEM_LOAD_THRESHOLD, 10) || 80,
   enablePrioritization: process.env.ENABLE_PRIORITIZATION === 'true',
   lowPriorityMaxLoad: parseInt(process.env.LOW_PRIORITY_MAX_LOAD, 10) || 80,
+
+  enableMetrics: process.env.ENABLE_METRICS === 'true',
+  metricsPath: process.env.METRICS_PATH || '/metrics',
+  metricsPrefix: process.env.METRICS_PREFIX || 'load_balancer_',
 };
 
 export default config;

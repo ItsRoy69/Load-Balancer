@@ -7,10 +7,10 @@ import NodeCache from "node-cache";
 import bodyParser from "body-parser";
 import crypto from "crypto";
 import config from "../config/config.js";
-import pkg from 'opossum';
-const { CircuitBreaker } = pkg;
+import CircuitBreaker from 'opossum';
 import { cpus } from 'os';
 import { createServer } from 'http';
+import promClient from 'prom-client';
 
 const app = express();
 
@@ -33,6 +33,49 @@ const requestPriorities = {
   MEDIUM: 2,
   LOW: 1
 };
+
+const registry = new promClient.Registry();
+promClient.collectDefaultMetrics({ register: registry });
+
+const httpRequestDurationMicroseconds = new promClient.Histogram({
+  name: 'http_request_duration_ms',
+  help: 'Duration of HTTP requests in ms',
+  labelNames: ['method', 'route', 'code'],
+  buckets: [0.1, 5, 15, 50, 100, 200, 300, 400, 500]
+});
+registry.registerMetric(httpRequestDurationMicroseconds);
+
+const activeConnectionsGauge = new promClient.Gauge({
+  name: 'active_connections',
+  help: 'Number of active connections'
+});
+registry.registerMetric(activeConnectionsGauge);
+
+const serverHealthScoreGauge = new promClient.Gauge({
+  name: 'server_health_score',
+  help: 'Health score of backend servers',
+  labelNames: ['server']
+});
+registry.registerMetric(serverHealthScoreGauge);
+
+const circuitBreakerStateGauge = new promClient.Gauge({
+  name: 'circuit_breaker_state',
+  help: 'State of circuit breakers (0: Closed, 1: Open, 0.5: Half-Open)',
+  labelNames: ['server']
+});
+registry.registerMetric(circuitBreakerStateGauge);
+
+const cacheHitsCounter = new promClient.Counter({
+  name: 'cache_hits_total',
+  help: 'Total number of cache hits'
+});
+registry.registerMetric(cacheHitsCounter);
+
+const cacheMissesCounter = new promClient.Counter({
+  name: 'cache_misses_total',
+  help: 'Total number of cache misses'
+});
+registry.registerMetric(cacheMissesCounter);
 
 const rateLimiter = rateLimit({
   windowMs: config.rateLimitWindow,
@@ -116,6 +159,8 @@ function updateServerHealthScore(server) {
   } else {
     serverHealthScores[server.domain] = Math.min(100, serverHealthScores[server.domain] + 5);
   }
+
+  serverHealthScoreGauge.set({ server: server.domain }, serverHealthScores[server.domain]);
 }
 
 function getCircuitBreaker(server) {
@@ -132,15 +177,18 @@ function getCircuitBreaker(server) {
     circuitBreakers[server.domain].on('open', () => {
       console.log(`Circuit breaker opened for ${server.domain}`);
       server.isDown = true;
+      circuitBreakerStateGauge.set({ server: server.domain }, 1);
     });
 
     circuitBreakers[server.domain].on('halfOpen', () => {
       console.log(`Circuit breaker half-opened for ${server.domain}`);
+      circuitBreakerStateGauge.set({ server: server.domain }, 0.5);
     });
 
     circuitBreakers[server.domain].on('close', () => {
       console.log(`Circuit breaker closed for ${server.domain}`);
       server.isDown = false;
+      circuitBreakerStateGauge.set({ server: server.domain }, 0);
     });
   }
 
@@ -382,6 +430,8 @@ async function retryRequest(req, res) {
   const cacheKey = req.method + req.url;
   const priority = getPriority(req);
 
+  const end = httpRequestDurationMicroseconds.startTimer();
+
   logRequest(requestId, "Incoming request", {
     method: req.method,
     url: req.url,
@@ -391,6 +441,7 @@ async function retryRequest(req, res) {
   if (config.enableCache && req.method === "GET") {
     const cachedResponse = cache.get(cacheKey);
     if (cachedResponse) {
+      cacheHitsCounter.inc();
       logRequest(requestId, "Cache hit", { cacheKey });
       res.status(cachedResponse.status);
       for (const [key, value] of Object.entries(cachedResponse.headers)) {
@@ -402,8 +453,10 @@ async function retryRequest(req, res) {
         status: cachedResponse.status,
         source: "cache",
       });
+      end({ method: req.method, route: req.path, code: cachedResponse.status });
       return;
     }
+    cacheMissesCounter.inc();
   }
 
   for (const region of config.regions) {
@@ -446,6 +499,7 @@ async function retryRequest(req, res) {
         if (proxyRes.status === 429) {
           res.status(429).send("Rate limit exceeded. Please try again later.");
           logRequest(requestId, "Rate limit exceeded");
+          end({ method: req.method, route: req.path, code: 429 });
           return;
         }
 
@@ -496,7 +550,7 @@ async function retryRequest(req, res) {
         });
 
         updateServerHealthScore(server);
-
+        end({ method: req.method, route: req.path, code: proxyRes.status });
         return;
       } catch (error) {
         logRequest(requestId, "Error proxying to backend", {
@@ -528,6 +582,7 @@ async function retryRequest(req, res) {
     duration: Date.now() - startTime,
     status: priority === requestPriorities.HIGH ? 503 : 429,
   });
+  end({ method: req.method, route: req.path, code: priority === requestPriorities.HIGH ? 503 : 429 });
 }
 
 app.get("/health", (req, res) => {
@@ -600,9 +655,21 @@ function getPriority(req) {
   }
 }
 
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', registry.contentType);
+  res.end(await registry.metrics());
+});
+
 server = createServer(app);
 server.listen(config.lbPORT, () => {
   console.log(`Load balancer running on port ${config.lbPORT} (HTTP)`);
+});
+
+server.on('connection', (socket) => {
+  activeConnectionsGauge.inc();
+  socket.on('close', () => {
+    activeConnectionsGauge.dec();
+  });
 });
 
 process.on('SIGTERM', gracefulShutdown);
