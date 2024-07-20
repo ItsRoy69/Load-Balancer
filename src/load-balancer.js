@@ -118,42 +118,48 @@ function updateServerHealthScore(server) {
   }
 }
 
-async function performHealthCheck(server) {
-  if (!server || !server.domain) {
-    console.error('Invalid server object:', server);
-    return false;
+function getCircuitBreaker(server) {
+  if (!circuitBreakers[server.domain]) {
+    circuitBreakers[server.domain] = new CircuitBreaker(async () => {
+      const response = await fetch(`${server.domain}${config.be_ping_path}`);
+      if (!response.ok) throw new Error('Server unhealthy');
+    }, {
+      timeout: config.requestTimeout,
+      errorThresholdPercentage: config.circuitBreakerErrorThreshold,
+      resetTimeout: config.circuitBreakerResetTimeout
+    });
+
+    circuitBreakers[server.domain].on('open', () => {
+      console.log(`Circuit breaker opened for ${server.domain}`);
+      server.isDown = true;
+    });
+
+    circuitBreakers[server.domain].on('halfOpen', () => {
+      console.log(`Circuit breaker half-opened for ${server.domain}`);
+    });
+
+    circuitBreakers[server.domain].on('close', () => {
+      console.log(`Circuit breaker closed for ${server.domain}`);
+      server.isDown = false;
+    });
   }
 
-  for (let i = 0; i < config.be_ping_retries; i++) {
-    try {
-      const url = new URL(config.be_ping_path, server.domain);
-      const response = await fetch(url, {
-        timeout: 5000,
-      });
-      if (response.ok) {
-        return true;
-      }
-    } catch (error) {
-      console.error(`Health check failed for ${server.domain}:`, error);
-    }
-    await new Promise((resolve) =>
-      setTimeout(resolve, config.be_ping_retry_delay)
-    );
-  }
-  return false;
+  return circuitBreakers[server.domain];
 }
 
 async function periodicHealthChecks() {
   for (const region of config.regions) {
     let allRegionServersDown = true;
     for (const server of region.servers) {
-      const isHealthy = await performHealthCheck(server);
-      console.log(
-        `Server ${server.domain} in region ${region.name} health status: ${
-          isHealthy ? "Healthy" : "Unhealthy"
-        }`
-      );
-      if (!isHealthy && !server.isDown) {
+      const circuitBreaker = getCircuitBreaker(server);
+      
+      try {
+        await circuitBreaker.fire();
+        console.log(`Server ${server.domain} in region ${region.name} health status: Healthy`);
+        server.isDown = false;
+        allRegionServersDown = false;
+      } catch (error) {
+        console.log(`Server ${server.domain} in region ${region.name} health status: Unhealthy`);
         server.isDown = true;
         beFailureStreak++;
         if (beFailureStreak >= config.alert_on_be_failure_streak) {
@@ -166,17 +172,9 @@ async function periodicHealthChecks() {
         if (config.enableSelfHealing) {
           attemptServerHeal(server, region.name);
         }
-      } else if (isHealthy && server.isDown) {
-        server.isDown = false;
-        console.log(
-          `Server ${server.domain} in region ${region.name} is back online`
-        );
-        beFailureStreak = 0;
       }
+      
       updateServerHealthScore(server);
-      if (isHealthy) {
-        allRegionServersDown = false;
-      }
     }
     if (allRegionServersDown) {
       sendAlert(
@@ -243,7 +241,11 @@ async function selectServer(req, forceRegion = null) {
     return null;
   }
 
-  const healthyServers = regionConfig.servers.filter(s => !s.isDown && serverHealthScores[s.domain] > 30);
+  const healthyServers = regionConfig.servers.filter(s => 
+    !s.isDown && 
+    serverHealthScores[s.domain] > config.healthScoreThreshold &&
+    !circuitBreakers[s.domain]?.opened
+  );
 
   if (healthyServers.length === 0) {
     console.error(`No healthy servers available in region ${region}`);
@@ -374,35 +376,6 @@ if (config.enableLatencyBasedRouting) {
   setInterval(updateServerLatencies, config.latencyCheckInterval);
 }
 
-function getCircuitBreaker(server) {
-  if (!circuitBreakers[server.domain]) {
-    circuitBreakers[server.domain] = new CircuitBreaker(async () => {
-      const response = await fetch(`${server.domain}${config.be_ping_path}`);
-      if (!response.ok) throw new Error('Server unhealthy');
-    }, {
-      timeout: 3000,
-      errorThresholdPercentage: 50,
-      resetTimeout: 30000
-    });
-
-    circuitBreakers[server.domain].on('open', () => {
-      console.log(`Circuit breaker opened for ${server.domain}`);
-      server.isDown = true;
-    });
-
-    circuitBreakers[server.domain].on('halfOpen', () => {
-      console.log(`Circuit breaker half-opened for ${server.domain}`);
-    });
-
-    circuitBreakers[server.domain].on('close', () => {
-      console.log(`Circuit breaker closed for ${server.domain}`);
-      server.isDown = false;
-    });
-  }
-
-  return circuitBreakers[server.domain];
-}
-
 async function retryRequest(req, res) {
   const requestId = generateRequestId();
   const startTime = Date.now();
@@ -522,7 +495,6 @@ async function retryRequest(req, res) {
           source: "backend",
         });
 
-        // Update health score after successful request
         updateServerHealthScore(server);
 
         return;
@@ -533,7 +505,6 @@ async function retryRequest(req, res) {
           error: error.message,
         });
         updateServerHealthScore(server);
-        server.isDown = true;
         if (config.enableStickySession) {
           res.clearCookie(config.stickySessionCookieName);
           logRequest(requestId, "Cleared sticky session cookie");

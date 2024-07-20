@@ -94,8 +94,8 @@ const config = {
   workerProcesses: parseInt(process.env.WORKER_PROCESSES, 10) || 1,
 
   enableCircuitBreaker: process.env.ENABLE_CIRCUIT_BREAKER === 'true',
-  circuitBreakerThreshold: parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD, 10) || 5,
-  circuitBreakerTimeout: parseInt(process.env.CIRCUIT_BREAKER_TIMEOUT, 10) || 30000,
+  circuitBreakerErrorThreshold: parseInt(process.env.CIRCUIT_BREAKER_ERROR_THRESHOLD, 10) || 50,
+  circuitBreakerResetTimeout: parseInt(process.env.CIRCUIT_BREAKER_RESET_TIMEOUT, 10) || 30000,
 
   requestTimeout: parseInt(process.env.REQUEST_TIMEOUT, 10) || 30000,
 
@@ -129,8 +129,6 @@ const config = {
 
   healthScoreThreshold: parseInt(process.env.HEALTH_SCORE_THRESHOLD, 10) || 30,
   systemLoadThreshold: parseInt(process.env.SYSTEM_LOAD_THRESHOLD, 10) || 80,
-  circuitBreakerErrorThreshold: parseInt(process.env.CIRCUIT_BREAKER_ERROR_THRESHOLD, 10) || 50,
-  circuitBreakerResetTimeout: parseInt(process.env.CIRCUIT_BREAKER_RESET_TIMEOUT, 10) || 30000,
   enablePrioritization: process.env.ENABLE_PRIORITIZATION === 'true',
   lowPriorityMaxLoad: parseInt(process.env.LOW_PRIORITY_MAX_LOAD, 10) || 80,
 };
