@@ -23,6 +23,110 @@ const config = {
   enableCache: process.env.ENABLE_CACHE === 'true',
   cacheTTL: parseInt(process.env.CACHE_TTL, 10) || 300,
   contentBasedRouting: JSON.parse(process.env.CONTENT_BASED_ROUTING || '[]'),
+
+regions: [
+  {
+    name: 'us-east',
+    servers: [
+      { domain: process.env.US_EAST_SERVER_1, weight: 1 },
+      { domain: process.env.US_EAST_SERVER_2, weight: 1 },
+    ],
+  },
+  {
+    name: 'us-west',
+    servers: [
+      { domain: process.env.US_WEST_SERVER_1, weight: 1 },
+      { domain: process.env.US_WEST_SERVER_2, weight: 1 },
+    ],
+  },
+  {
+    name: 'eu-west',
+    servers: [
+      { domain: process.env.EU_WEST_SERVER_1, weight: 1 },
+      { domain: process.env.EU_WEST_SERVER_2, weight: 1 },
+    ],
+  },
+  {
+    name: 'eu-central',
+    servers: [
+      { domain: process.env.EU_CENTRAL_SERVER_1, weight: 1 },
+      { domain: process.env.EU_CENTRAL_SERVER_2, weight: 1 },
+    ],
+  },
+  {
+    name: 'ap-southeast',
+    servers: [
+      { domain: process.env.AP_SOUTHEAST_SERVER_1, weight: 1 },
+      { domain: process.env.AP_SOUTHEAST_SERVER_2, weight: 1 },
+    ],
+  },
+  {
+    name: 'ap-northeast',
+    servers: [
+      { domain: process.env.AP_NORTHEAST_SERVER_1, weight: 1 },
+      { domain: process.env.AP_NORTHEAST_SERVER_2, weight: 1 },
+    ],
+  },
+  {
+    name: 'sa-east',
+    servers: [
+      { domain: process.env.SA_EAST_SERVER_1, weight: 1 },
+      { domain: process.env.SA_EAST_SERVER_2, weight: 1 },
+    ],
+  },
+],
+defaultRegion: process.env.DEFAULT_REGION || 'us-east',
+  defaultRegion: process.env.DEFAULT_REGION || 'us-east',
+  enableGeoRouting: process.env.ENABLE_GEO_ROUTING === 'true',
+  geoRoutingService: process.env.GEO_ROUTING_SERVICE,
+  enableLatencyBasedRouting: process.env.ENABLE_LATENCY_BASED_ROUTING === 'true',
+  latencyCheckInterval: parseInt(process.env.LATENCY_CHECK_INTERVAL, 10) || 300000,
+  enableRateLimit: process.env.ENABLE_RATE_LIMIT === 'true',
+  rateLimitWindow: parseInt(process.env.RATE_LIMIT_WINDOW, 10) || 900000,
+  rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX, 10) || 100,
+
+  enableSSL: process.env.ENABLE_SSL === 'true',
+  sslCertPath: process.env.SSL_CERT_PATH,
+  sslKeyPath: process.env.SSL_KEY_PATH,
+
+  logLevel: process.env.LOG_LEVEL || 'info',
+  logFormat: process.env.LOG_FORMAT || 'json',
+
+  workerProcesses: parseInt(process.env.WORKER_PROCESSES, 10) || 1,
+
+  enableCircuitBreaker: process.env.ENABLE_CIRCUIT_BREAKER === 'true',
+  circuitBreakerThreshold: parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD, 10) || 5,
+  circuitBreakerTimeout: parseInt(process.env.CIRCUIT_BREAKER_TIMEOUT, 10) || 30000,
+
+  requestTimeout: parseInt(process.env.REQUEST_TIMEOUT, 10) || 30000,
+
+  customErrorPages: JSON.parse(process.env.CUSTOM_ERROR_PAGES || '{}'),
+
+  enableWebSocket: process.env.ENABLE_WEBSOCKET === 'true',
+
+  enableCORS: process.env.ENABLE_CORS === 'true',
+  corsOrigin: process.env.CORS_ORIGIN || '*',
+  corsMethods: process.env.CORS_METHODS || 'GET,HEAD,PUT,PATCH,POST,DELETE',
+
+  enableCompression: process.env.ENABLE_COMPRESSION === 'true',
+  compressionLevel: parseInt(process.env.COMPRESSION_LEVEL, 10) || 6,
+
+  ipWhitelist: process.env.IP_WHITELIST ? process.env.IP_WHITELIST.split(',') : [],
+  ipBlacklist: process.env.IP_BLACKLIST ? process.env.IP_BLACKLIST.split(',') : [],
+
+  enableRequestTransform: process.env.ENABLE_REQUEST_TRANSFORM === 'true',
+  enableResponseTransform: process.env.ENABLE_RESPONSE_TRANSFORM === 'true',
+
+  enableApiKeyAuth: process.env.ENABLE_API_KEY_AUTH === 'true',
+  apiKeys: process.env.API_KEYS ? process.env.API_KEYS.split(',') : [],
+
+  enableMonitoring: process.env.ENABLE_MONITORING === 'true',
+  monitoringPath: process.env.MONITORING_PATH || '/monitoring',
+
+  enableDynamicConfig: process.env.ENABLE_DYNAMIC_CONFIG === 'true',
+  dynamicConfigInterval: parseInt(process.env.DYNAMIC_CONFIG_INTERVAL, 10) || 60000,
+
+  gracefulShutdownTimeout: parseInt(process.env.GRACEFUL_SHUTDOWN_TIMEOUT, 10) || 30000,
 };
 
 export default config;
