@@ -1,5 +1,4 @@
 import express from "express";
-import http from "http";
 import httpProxy from "http-proxy";
 import fetch from "node-fetch";
 import rateLimit from "express-rate-limit";
@@ -11,6 +10,7 @@ import config from "../config/config.js";
 import pkg from 'opossum';
 const { CircuitBreaker } = pkg;
 import { cpus } from 'os';
+import { createServer } from 'http';
 
 const app = express();
 
@@ -56,6 +56,40 @@ const rateLimiter = rateLimit({
 app.use(rateLimiter);
 app.use(cookieParser());
 app.use(bodyParser.json());
+
+let server;
+let shuttingDown = false;
+let activeConnections = new Set();
+
+function gracefulShutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  console.log('Graceful shutdown initiated');
+
+  server.close(() => {
+    console.log('Server closed, no longer accepting connections');
+  });
+
+  const forcefulShutdownTimeout = setTimeout(() => {
+    console.error('Could not close connections in time, forcefully shutting down');
+    process.exit(1);
+  }, config.gracefulShutdownTimeout);
+
+  if (activeConnections.size === 0) {
+    console.log('No active connections, shutting down immediately');
+    process.exit(0);
+  } else {
+    console.log(`Waiting for ${activeConnections.size} active connections to finish`);
+    setInterval(() => {
+      if (activeConnections.size === 0) {
+        clearTimeout(forcefulShutdownTimeout);
+        console.log('All connections closed, shutting down gracefully');
+        process.exit(0);
+      }
+    }, 1000);
+  }
+}
 
 function generateRequestId() {
   return crypto.randomBytes(16).toString("hex");
@@ -542,7 +576,19 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res) => {
+  if (shuttingDown) {
+    res.set('Connection', 'close');
+    res.status(503).send('Server is in the process of shutting down');
+    return;
+  }
+
   const requestId = generateRequestId();
+  activeConnections.add(requestId);
+
+  res.on('finish', () => {
+    activeConnections.delete(requestId);
+  });
+
   logRequest(requestId, "Received request", {
     method: req.method,
     url: req.url,
@@ -552,6 +598,8 @@ app.use((req, res) => {
     console.error("Unhandled error in retryRequest:", error);
     logRequest(requestId, "Unhandled error", { error: error.message });
     res.status(500).send("Internal Server Error");
+  }).finally(() => {
+    activeConnections.delete(requestId);
   });
 });
 
@@ -581,6 +629,10 @@ function getPriority(req) {
   }
 }
 
-http.createServer(app).listen(config.lbPORT, () => {
+server = createServer(app);
+server.listen(config.lbPORT, () => {
   console.log(`Load balancer running on port ${config.lbPORT} (HTTP)`);
 });
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
