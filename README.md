@@ -4,33 +4,6 @@
 
 This project implements a dynamic load balancer using Node.js and Express. It distributes incoming HTTP requests across multiple backend servers, performs health checks, and implements self-healing capabilities.
 
-## Features
-
-- Dynamic server pool management
-- Multiple load balancing algorithms (Round Robin, Weighted Round Robin)
-- Periodic health checks
-- Self-healing attempts for failed servers
-- Configurable retry logic
-- Alert system for server failures
-- Rate limiting
-- Sticky sessions
-- Caching
-- Content-based routing
-- Geo-routing
-- Latency-based routing
-- SSL/TLS support
-- Multi-region support
-- Circuit breaker pattern
-- WebSocket support
-- CORS configuration
-- Request/Response compression
-- IP whitelisting and blacklisting
-- Request/Response transformation
-- API key authentication
-- Monitoring endpoints
-- Dynamic configuration reloading
-- Graceful shutdown
-
 ## Prerequisites
 
 - Node.js (v14 or later recommended)
