@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Line, Bar } from 'react-chartjs-2';
+import { Bar } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -26,11 +26,9 @@ import {
   TableRow,
   Card,
   CardContent,
-  List,
-  ListItem,
-  ListItemText,
 } from '@mui/material';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
+import MetricsDisplay from './MetricsDisplay';
 
 ChartJS.register(
   CategoryScale,
@@ -55,7 +53,10 @@ const theme = createTheme({
 });
 
 function App() {
-  const [data, setData] = useState({ servers: [], metrics: {} });
+  const [data, setData] = useState({
+    servers: [],
+    metrics: {}
+  });
 
   useEffect(() => {
     const ws = new WebSocket('ws://localhost:80');
@@ -188,18 +189,7 @@ function App() {
               </Card>
             </Grid>
             <Grid item xs={12}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6">Metrics</Typography>
-                  <List>
-                    {Object.entries(data.metrics).map(([key, value]) => (
-                      <ListItem key={key}>
-                        <ListItemText primary={key} secondary={value} />
-                      </ListItem>
-                    ))}
-                  </List>
-                </CardContent>
-              </Card>
+              <MetricsDisplay metrics={data.metrics} />
             </Grid>
           </Grid>
         </Container>
