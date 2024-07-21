@@ -11,6 +11,8 @@ import CircuitBreaker from 'opossum';
 import { cpus } from 'os';
 import { createServer } from 'http';
 import promClient from 'prom-client';
+import cors from "cors";
+import { WebSocketServer } from 'ws';
 
 const app = express();
 
@@ -40,7 +42,7 @@ promClient.collectDefaultMetrics({ register: registry });
 const httpRequestDurationMicroseconds = new promClient.Histogram({
   name: 'http_request_duration_ms',
   help: 'Duration of HTTP requests in ms',
-  labelNames: ['method', 'route', 'code'],
+  labelNames: ['method', 'route', 'code', 'server'],
   buckets: [0.1, 5, 15, 50, 100, 200, 300, 400, 500]
 });
 registry.registerMetric(httpRequestDurationMicroseconds);
@@ -99,6 +101,7 @@ const rateLimiter = rateLimit({
 app.use(rateLimiter);
 app.use(cookieParser());
 app.use(bodyParser.json());
+app.use(cors());
 
 let server;
 let shuttingDown = false;
@@ -499,7 +502,7 @@ async function retryRequest(req, res) {
         if (proxyRes.status === 429) {
           res.status(429).send("Rate limit exceeded. Please try again later.");
           logRequest(requestId, "Rate limit exceeded");
-          end({ method: req.method, route: req.path, code: 429 });
+          end({ method: req.method, route: req.path, code: 429, server: server.domain });
           return;
         }
 
@@ -550,7 +553,7 @@ async function retryRequest(req, res) {
         });
 
         updateServerHealthScore(server);
-        end({ method: req.method, route: req.path, code: proxyRes.status });
+        end({ method: req.method, route: req.path, code: proxyRes.status, server: server.domain });
         return;
       } catch (error) {
         logRequest(requestId, "Error proxying to backend", {
@@ -660,6 +663,36 @@ app.get('/metrics', async (req, res) => {
   res.end(await registry.metrics());
 });
 
+app.get('/api/servers', (req, res) => {
+  const serverInfo = config.regions.flatMap(region => 
+    region.servers.map(server => ({
+      region: region.name,
+      domain: server.domain,
+      isHealthy: !server.isDown,
+      healthScore: serverHealthScores[server.domain] || 0,
+      latency: server.latency || 0
+    }))
+  );
+  res.json(serverInfo);
+});
+
+app.get('/api/metrics', async (req, res) => {
+  res.set('Content-Type', registry.contentType);
+  const metrics = await registry.metrics();
+  res.json(parsePrometheusMetrics(metrics));
+});
+
+function parsePrometheusMetrics(metrics) {
+  const parsedMetrics = {};
+  metrics.split('\n').forEach(line => {
+    if (line && !line.startsWith('#')) {
+      const [name, value] = line.split(' ');
+      parsedMetrics[name] = parseFloat(value);
+    }
+  });
+  return parsedMetrics;
+}
+
 server = createServer(app);
 server.listen(config.lbPORT, () => {
   console.log(`Load balancer running on port ${config.lbPORT} (HTTP)`);
@@ -672,5 +705,36 @@ server.on('connection', (socket) => {
   });
 });
 
+const wss = new WebSocketServer({ server });
+
+wss.on('connection', (ws) => {
+  console.log('New WebSocket connection');
+
+  const sendUpdate = async () => {
+    const serversData = config.regions.flatMap(region => 
+      region.servers.map(server => ({
+        region: region.name,
+        domain: server.domain,
+        isHealthy: !server.isDown,
+        healthScore: serverHealthScores[server.domain] || 0,
+        latency: server.latency || 0
+      }))
+    );
+
+    const metrics = await registry.metrics();
+    const parsedMetrics = parsePrometheusMetrics(metrics);
+
+    ws.send(JSON.stringify({ servers: serversData, metrics: parsedMetrics }));
+  };
+
+  const interval = setInterval(sendUpdate, 1000);
+
+  ws.on('close', () => {
+    clearInterval(interval);
+  });
+});
+
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
+
+export default app;
