@@ -15,9 +15,58 @@ import cors from "cors";
 import { WebSocketServer } from 'ws';
 
 const app = express();
+
+console.log("Regions config:", JSON.stringify(config.regions, null, 2));
+
+app.get('/test-route', (req, res) => {
+  res.send('Test route is working');
+});
+
 app.get('/test', (req, res) => {
   res.send('Load balancer is running');
 });
+
+app.get("/health", (req, res) => {
+  const requestId = generateRequestId();
+  logRequest(requestId, "Health check request");
+  res.status(200).send("OK");
+  logRequest(requestId, "Health check response sent");
+});
+
+app.get('/metrics', async (req, res) => {
+  console.log("Metrics request received");
+  res.set('Content-Type', registry.contentType);
+  const metrics = await registry.metrics();
+  console.log("Sending metrics response");
+  res.end(metrics);
+});
+
+app.get('/api/servers', (req, res) => {
+  const serverInfo = config.regions.flatMap(region => 
+    region.servers.map(server => ({
+      region: region.name,
+      domain: server.domain,
+      isHealthy: !server.isDown,
+      healthScore: serverHealthScores[server.domain] || 0,
+      latency: server.latency || 0
+    }))
+  );
+  res.json(serverInfo);
+});
+
+app.get('/api/metrics', async (req, res) => {
+  try {
+    console.log("API Metrics request received at", new Date().toISOString());
+    res.set('Content-Type', registry.contentType);
+    const metrics = await registry.metrics();
+    res.json(parsePrometheusMetrics(metrics));
+  } catch (error) {
+    console.error("Error in /api/metrics route:", error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+
 const proxy = httpProxy.createProxyServer();
 
 let currentIndex = 0;
@@ -675,20 +724,6 @@ app.use((req, res, next) => {
   }
 });
 
-app.get("/health", (req, res) => {
-  const requestId = generateRequestId();
-  logRequest(requestId, "Health check request");
-  res.status(200).send("OK");
-  logRequest(requestId, "Health check response sent");
-});
-
-app.get('/metrics', async (req, res) => {
-  console.log("Metrics request received");
-  res.set('Content-Type', registry.contentType);
-  const metrics = await registry.metrics();
-  console.log("Sending metrics response");
-  res.end(metrics);
-});
 
 app.use((req, res) => {
   if (shuttingDown) {
@@ -718,24 +753,7 @@ app.use((req, res) => {
   });
 });
 
-app.get('/api/servers', (req, res) => {
-  const serverInfo = config.regions.flatMap(region => 
-    region.servers.map(server => ({
-      region: region.name,
-      domain: server.domain,
-      isHealthy: !server.isDown,
-      healthScore: serverHealthScores[server.domain] || 0,
-      latency: server.latency || 0
-    }))
-  );
-  res.json(serverInfo);
-});
 
-app.get('/api/metrics', async (req, res) => {
-  res.set('Content-Type', registry.contentType);
-  const metrics = await registry.metrics();
-  res.json(parsePrometheusMetrics(metrics));
-});
 
 function parsePrometheusMetrics(metrics) {
   const parsedMetrics = {};
