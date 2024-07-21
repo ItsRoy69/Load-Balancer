@@ -59,21 +59,53 @@ function App() {
   });
 
   useEffect(() => {
-    const ws = new WebSocket('ws://localhost:80');
+    let ws;
 
-    ws.onmessage = (event) => {
-      const newData = JSON.parse(event.data);
-      setData(newData);
+    const connectWebSocket = () => {
+      ws = new WebSocket('ws://localhost:8080');
+
+      ws.onopen = () => {
+        console.log('WebSocket connection established');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const newData = JSON.parse(event.data);
+          console.log('Received data:', newData);
+          setData(newData);
+        } catch (error) {
+          console.error('Error parsing WebSocket data:', error);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+
+      ws.onclose = (event) => {
+        console.log('WebSocket connection closed');
+        if (!event.wasClean) {
+          console.log('WebSocket connection lost. Attempting to reconnect...');
+          setTimeout(connectWebSocket, 5000);
+        }
+      };
     };
 
-    return () => ws.close();
+    connectWebSocket();
+
+    return () => {
+      if (ws) {
+        console.log('Closing WebSocket connection');
+        ws.close();
+      }
+    };
   }, []);
 
   const serverHealthData = {
-    labels: data.servers.map(server => server.domain),
+    labels: data.servers?.map(server => server.domain) || [],
     datasets: [{
       label: 'Server Health Scores',
-      data: data.servers.map(server => server.healthScore),
+      data: data.servers?.map(server => server.healthScore) || [],
       backgroundColor: 'rgba(75, 192, 192, 0.2)',
       borderColor: 'rgba(75, 192, 192, 1)',
       borderWidth: 1,
@@ -81,10 +113,10 @@ function App() {
   };
 
   const serverLatencyData = {
-    labels: data.servers.map(server => server.domain),
+    labels: data.servers?.map(server => server.domain) || [],
     datasets: [{
       label: 'Server Latency (ms)',
-      data: data.servers.map(server => server.latency),
+      data: data.servers?.map(server => server.latency) || [],
       backgroundColor: 'rgba(255, 99, 132, 0.2)',
       borderColor: 'rgba(255, 99, 132, 1)',
       borderWidth: 1,
@@ -92,12 +124,12 @@ function App() {
   };
 
   const requestsPerSecondData = {
-    labels: data.servers.map(server => server.domain),
+    labels: data.servers?.map(server => server.domain) || [],
     datasets: [{
       label: 'Requests per Second',
-      data: data.servers.map(server => 
-        data.metrics[`http_request_duration_ms_count{server="${server.domain}"}`] || 0
-      ),
+      data: data.servers?.map(server => 
+        data.metrics?.[`http_request_duration_ms_count{server="${server.domain}"}`] || 0
+      ) || [],
       backgroundColor: 'rgba(54, 162, 235, 0.2)',
       borderColor: 'rgba(54, 162, 235, 1)',
       borderWidth: 1,
@@ -118,14 +150,18 @@ function App() {
               <Card>
                 <CardContent>
                   <Typography variant="h6">Server Health</Typography>
-                  <Bar data={serverHealthData} options={{
-                    scales: {
-                      y: {
-                        beginAtZero: true,
-                        max: 100,
+                  {serverHealthData.labels.length > 0 ? (
+                    <Bar data={serverHealthData} options={{
+                      scales: {
+                        y: {
+                          beginAtZero: true,
+                          max: 100,
+                        }
                       }
-                    }
-                  }} />
+                    }} />
+                  ) : (
+                    <Typography>No server health data available</Typography>
+                  )}
                 </CardContent>
               </Card>
             </Grid>
@@ -133,13 +169,17 @@ function App() {
               <Card>
                 <CardContent>
                   <Typography variant="h6">Server Latency</Typography>
-                  <Bar data={serverLatencyData} options={{
-                    scales: {
-                      y: {
-                        beginAtZero: true,
+                  {serverLatencyData.labels.length > 0 ? (
+                    <Bar data={serverLatencyData} options={{
+                      scales: {
+                        y: {
+                          beginAtZero: true,
+                        }
                       }
-                    }
-                  }} />
+                    }} />
+                  ) : (
+                    <Typography>No server latency data available</Typography>
+                  )}
                 </CardContent>
               </Card>
             </Grid>
@@ -147,13 +187,17 @@ function App() {
               <Card>
                 <CardContent>
                   <Typography variant="h6">Requests per Second</Typography>
-                  <Bar data={requestsPerSecondData} options={{
-                    scales: {
-                      y: {
-                        beginAtZero: true,
+                  {requestsPerSecondData.labels.length > 0 ? (
+                    <Bar data={requestsPerSecondData} options={{
+                      scales: {
+                        y: {
+                          beginAtZero: true,
+                        }
                       }
-                    }
-                  }} />
+                    }} />
+                  ) : (
+                    <Typography>No requests per second data available</Typography>
+                  )}
                 </CardContent>
               </Card>
             </Grid>

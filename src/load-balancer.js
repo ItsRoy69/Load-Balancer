@@ -15,7 +15,9 @@ import cors from "cors";
 import { WebSocketServer } from 'ws';
 
 const app = express();
-
+app.get('/test', (req, res) => {
+  res.send('Load balancer is running');
+});
 const proxy = httpProxy.createProxyServer();
 
 let currentIndex = 0;
@@ -632,6 +634,18 @@ app.use((req, res) => {
   });
 });
 
+function getPriority(req) {
+  if (req.url === '/metrics' || req.url === '/health') {
+    return requestPriorities.HIGH;
+  } else if (req.headers['x-priority'] === 'high') {
+    return requestPriorities.HIGH;
+  } else if (req.headers['x-priority'] === 'medium') {
+    return requestPriorities.MEDIUM;
+  } else {
+    return requestPriorities.LOW;
+  }
+}
+
 function getSystemLoad() {
   const cpuInfo = cpus();
   let totalIdle = 0;
@@ -645,22 +659,63 @@ function getSystemLoad() {
     totalIdle += cpu.times.idle;
   }
 
-  return 100 - ~~(100 * totalIdle / totalTick);
+  const load = 100 - ~~(100 * totalIdle / totalTick);
+  console.log(`Current system load: ${load}`);
+  return load;
 }
 
-function getPriority(req) {
-  if (req.headers['x-priority'] === 'high') {
-    return requestPriorities.HIGH;
-  } else if (req.headers['x-priority'] === 'medium') {
-    return requestPriorities.MEDIUM;
+app.use((req, res, next) => {
+  const priority = getPriority(req);
+  const currentLoad = getSystemLoad();
+  console.log(`Request to ${req.url} with priority ${priority}, current load: ${currentLoad}`);
+  if (priority === requestPriorities.LOW && currentLoad > 80) {
+    res.status(503).send("Service temporarily unavailable due to high load. Please try again later.");
   } else {
-    return requestPriorities.LOW;
+    next();
   }
-}
+});
+
+app.get("/health", (req, res) => {
+  const requestId = generateRequestId();
+  logRequest(requestId, "Health check request");
+  res.status(200).send("OK");
+  logRequest(requestId, "Health check response sent");
+});
 
 app.get('/metrics', async (req, res) => {
+  console.log("Metrics request received");
   res.set('Content-Type', registry.contentType);
-  res.end(await registry.metrics());
+  const metrics = await registry.metrics();
+  console.log("Sending metrics response");
+  res.end(metrics);
+});
+
+app.use((req, res) => {
+  if (shuttingDown) {
+    res.set('Connection', 'close');
+    res.status(503).send('Server is in the process of shutting down');
+    return;
+  }
+
+  const requestId = generateRequestId();
+  activeConnections.add(requestId);
+
+  res.on('finish', () => {
+    activeConnections.delete(requestId);
+  });
+
+  logRequest(requestId, "Received request", {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+  });
+  retryRequest(req, res).catch((error) => {
+    console.error("Unhandled error in retryRequest:", error);
+    logRequest(requestId, "Unhandled error", { error: error.message });
+    res.status(500).send("Internal Server Error");
+  }).finally(() => {
+    activeConnections.delete(requestId);
+  });
 });
 
 app.get('/api/servers', (req, res) => {

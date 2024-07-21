@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const config = {
-  lbPORT: parseInt(process.env.LB_PORT, 10) || 80,
+  lbPORT: parseInt(process.env.LB_PORT, 10) || 8080,
   _lbAlgo: process.env.LB_ALGO || 'rr',
   be_servers: JSON.parse(process.env.BE_SERVERS || '[]'),
   be_retries: parseInt(process.env.BE_RETRIES, 10) || 3,
